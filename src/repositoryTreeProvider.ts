@@ -10,7 +10,10 @@ export class RepositoryTreeItem extends vscode.TreeItem {
     super(repo.name, collapsibleState);
     this.id = `${repo.owner}/${repo.name}`;
     this.tooltip = repo.description || repo.name;
-    this.description = repo.description || '';
+    this.description = repo.description ? (repo.description.length > 50 ? repo.description.substring(0, 50) + '...' : repo.description) : '';
+    
+    this.iconPath = new vscode.ThemeIcon('repo');
+    
     this.command = {
       command: 'github-milestones.openRepo',
       title: 'Open Repository',
@@ -20,13 +23,21 @@ export class RepositoryTreeItem extends vscode.TreeItem {
 }
 
 export class RepositoryTreeProvider implements vscode.TreeDataProvider<RepositoryTreeItem> {
-  private _onDidChangeTreeData = new vscode.EventEmitter<RepositoryTreeItem>();
+  private _onDidChangeTreeData = new vscode.EventEmitter<RepositoryTreeItem | undefined>();
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
+  private loading = false;
 
   constructor(private github: GitHubService) {}
 
   refresh(): void {
-    (this._onDidChangeTreeData as any).fire();
+    this._onDidChangeTreeData.fire(undefined);
+  }
+
+  setLoading(loading: boolean): void {
+    this.loading = loading;
+    if (loading) {
+      this._onDidChangeTreeData.fire(undefined);
+    }
   }
 
   getTreeItem(element: RepositoryTreeItem): vscode.TreeItem {
@@ -34,6 +45,10 @@ export class RepositoryTreeProvider implements vscode.TreeDataProvider<Repositor
   }
 
   async getChildren(element?: RepositoryTreeItem): Promise<RepositoryTreeItem[]> {
+    if (this.loading) {
+      return [this.getLoadingItem()];
+    }
+
     if (element) {
       return [];
     }
@@ -41,22 +56,36 @@ export class RepositoryTreeProvider implements vscode.TreeDataProvider<Repositor
     const config = vscode.workspace.getConfiguration('github-milestones');
     const owner = config.get<string>('defaultOwner');
 
-    let repos: GitHubRepository[];
-    try {
-      repos = owner ? await this.github.getRepos(owner) : await this.github.getRepos();
-    } catch (error) {
-      vscode.window.showErrorMessage(`Failed to load repositories: ${(error as Error).message}`);
-      return [];
-    }
+    this.loading = true;
+    this._onDidChangeTreeData.fire(undefined);
 
-    return repos.map(
-      (repo) =>
-        new RepositoryTreeItem(
-          repo,
-          vscode.TreeItemCollapsibleState.Collapsed,
-          this.github
-        )
-    );
+    try {
+      const repos = owner ? await this.github.getRepos(owner) : await this.github.getRepos();
+
+      const sortedRepos = repos.sort((a, b) => {
+        if (a.name < b.name) return -1;
+        if (a.name > b.name) return 1;
+        return 0;
+      });
+
+      this.loading = false;
+      this._onDidChangeTreeData.fire(undefined);
+
+      return sortedRepos.map(
+        (repo) =>
+          new RepositoryTreeItem(
+            repo,
+            vscode.TreeItemCollapsibleState.Collapsed,
+            this.github
+          )
+      );
+    } catch (error) {
+      this.loading = false;
+      this._onDidChangeTreeData.fire(undefined);
+
+      vscode.window.showErrorMessage(`Failed to load repositories: ${(error as Error).message}`);
+      return [this.getErrorItem(error)];
+    }
   }
 
   async getRepositoryChildren(
@@ -91,5 +120,29 @@ export class RepositoryTreeProvider implements vscode.TreeDataProvider<Repositor
     issuesItem.contextValue = 'issuesFolder';
 
     return [milestoneItem, issuesItem];
+  }
+
+  private getLoadingItem(): RepositoryTreeItem {
+    const item = new RepositoryTreeItem(
+      { owner: '', name: 'Loading...', htmlUrl: '' } as GitHubRepository,
+      vscode.TreeItemCollapsibleState.None,
+      this.github
+    );
+    item.iconPath = new vscode.ThemeIcon('loading~spin');
+    item.description = 'Fetching repositories...';
+    item.tooltip = 'Please wait...';
+    return item;
+  }
+
+  private getErrorItem(error: unknown): RepositoryTreeItem {
+    const item = new RepositoryTreeItem(
+      { owner: '', name: 'Error', htmlUrl: '' } as GitHubRepository,
+      vscode.TreeItemCollapsibleState.None,
+      this.github
+    );
+    item.iconPath = new vscode.ThemeIcon('error');
+    item.description = 'Authentication required';
+    item.tooltip = `Failed to load: ${(error as Error).message}. Try signing in again.`;
+    return item;
   }
 }

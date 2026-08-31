@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { GitHubService, GitHubIssue, GitHubMilestone, GitHubRepository } from './github';
-import { RepositoryTreeProvider } from './repositoryTreeProvider';
+import { RepositoryTreeProvider, RepositoryTreeItem } from './repositoryTreeProvider';
 import { MilestoneTreeProvider } from './milestoneTreeProvider';
 import { IssueTreeProvider } from './issueTreeProvider';
 import { IssueDetailProvider } from './issueDetailProvider';
@@ -103,12 +103,31 @@ export function activate(context: vscode.ExtensionContext) {
       milestoneProvider.setSelection(selectedOwner!, selectedRepo!);
       issueProvider.setSelection(selectedOwner!, selectedRepo!);
 
-      vscode.window.showInformationMessage(
-        `Selected repository: ${repo.owner}/${repo.name}`
-      );
+      let stateMsg = `Selected: ${repo.owner}/${repo.name}`;
+      if (repo.description) {
+        stateMsg += `\n${repo.description}`;
+      }
+      vscode.window.showInformationMessage(stateMsg);
     }
   );
   context.subscriptions.push(openRepo);
+
+  // Expand repository node to show sub-folders
+  const expandRepo = vscode.commands.registerCommand(
+    'github-milestones.expandRepo',
+    async (repoItem: RepositoryTreeItem) => {
+      if (!selectedOwner || !selectedRepo) {
+        return;
+      }
+      const children = await repositoryProvider.getRepositoryChildren(
+        selectedOwner,
+        selectedRepo,
+        repoItem
+      );
+      return children;
+    }
+  );
+  context.subscriptions.push(expandRepo);
 
   // Open milestone detail in webview panel
   const openMilestone = vscode.commands.registerCommand(
@@ -128,8 +147,8 @@ export function activate(context: vscode.ExtensionContext) {
 
       panel.webview.html = getMilestoneDetailHtml(milestone, owner, repo);
 
-      panel.onDidReceiveMessage((message) => {
-        if (message.type === 'openInBrowser') {
+      panel.webview.onDidReceiveMessage((message: { type: string; url?: string }) => {
+        if (message.type === 'openInBrowser' && message.url) {
           vscode.env.openExternal(vscode.Uri.parse(message.url));
         }
       });
@@ -159,8 +178,8 @@ export function activate(context: vscode.ExtensionContext) {
 
       panel.webview.html = getIssueDetailHtml(issue, owner, repo);
 
-      panel.onDidReceiveMessage((message) => {
-        if (message.type === 'openInBrowser') {
+      panel.webview.onDidReceiveMessage((message: { type: string; url?: string }) => {
+        if (message.type === 'openInBrowser' && message.url) {
           vscode.env.openExternal(vscode.Uri.parse(message.url));
         }
       });
