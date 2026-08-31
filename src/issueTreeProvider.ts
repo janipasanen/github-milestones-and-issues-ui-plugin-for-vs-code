@@ -65,11 +65,14 @@ export class IssueTreeProvider implements vscode.TreeDataProvider<IssueTreeItem>
     }
 
     try {
+      const config = vscode.workspace.getConfiguration('github-milestones');
+      const filter = config.get<'open' | 'closed' | 'all'>('issueFilter') || 'open';
+
       const issues = await this.github.getIssues(
         this.selectedOwner,
         this.selectedRepo,
         this.selectedMilestoneNumber,
-        'all'
+        filter
       );
 
       return issues.map(

@@ -41,6 +41,11 @@ class MockGitHubClient {
     },
   ];
 
+  comments = [
+    { id: 1, body: 'First comment', created_at: '2024-01-15T00:00:00Z', user: { login: 'user1', html_url: 'https://github.com/user1' } },
+    { id: 2, body: 'Second comment', created_at: '2024-01-16T00:00:00Z', user: { login: 'user2', html_url: 'https://github.com/user2' } },
+  ];
+
   // Methods that GitHubService calls on the Octokit instance
   users = { getAuthenticated: () => Promise.resolve({ data: this.authData }) };
   reposList = {
@@ -94,6 +99,69 @@ describe('GitHubService', () => {
           const issue = mock.issueList.find((i: any) => i.number === params.issue_number);
           if (issue) return { data: issue };
           throw new Error('Issue not found');
+        },
+        create: (params: any) => {
+          return { data: { 
+            id: 999, number: 3, title: params.title, state: 'open', body: params.body,
+            html_url: `https://github.com/testuser/test-repo/issues/3`,
+            created_at: '2024-01-20T00:00:00Z', updated_at: '2024-01-20T00:00:00Z', closed_at: null,
+            labels: [], assignees: [], user: { login: 'testuser', html_url: 'https://github.com/testuser', avatar_url: '' },
+            comments: 0, milestone: params.milestone ? { number: params.milestone, title: 'Milestone 1', state: 'open', html_url: '', created_at: '', updated_at: '' } : null,
+          } };
+        },
+        update: (params: any) => {
+          const existing = mock.issueList.find((i: any) => i.number === params.issue_number);
+          const updated = { 
+            ...existing, 
+            ...params, 
+            labels: params.labels || (existing?.labels || []),
+            assignees: params.assignees || (existing?.assignees || []),
+            html_url: existing?.html_url || 'https://github.com/testuser/test-repo/issues/' + params.issue_number,
+            created_at: existing?.created_at || '2024-01-10T00:00:00Z',
+            updated_at: new Date().toISOString(),
+            closed_at: params.state === 'closed' ? new Date().toISOString() : null,
+          };
+          return { data: updated };
+        },
+        updateMilestone: (params: any) => {
+          const existing = mock.milestoneList.find((m: any) => m.number === params.milestone_number);
+          return { data: { 
+            number: params.milestone_number,
+            title: params.title || existing?.title,
+            description: params.description || existing?.description,
+            state: params.state || existing?.state,
+            due_on: params.dueOn || existing?.due_on,
+            clear_due_on: params.clearDueOn || false,
+            html_url: existing?.html_url || `https://github.com/testuser/test-repo/milestone/${params.milestone_number}`,
+            created_at: existing?.created_at || '2024-01-01T00:00:00Z',
+            updated_at: new Date().toISOString(),
+            open_issues: existing?.open_issues || 0,
+            closed_issues: existing?.closed_issues || 0,
+          } };
+        },
+        listComments: () => ({ data: mock.comments || [] }),
+        createComment: (params: any) => ({ 
+          data: { 
+            id: 200, body: params.body, created_at: new Date().toISOString(), 
+            user: { login: 'testuser', html_url: 'https://github.com/testuser' } 
+          } 
+        }),
+      },
+      search: {
+        repos: (params: any) => ({ 
+          data: { 
+            items: mock.repoList.filter((r: any) => r.name.toLowerCase().includes(params.q.toLowerCase()) || r.description?.toLowerCase().includes(params.q.toLowerCase())) 
+          } 
+        }),
+        issuesAndPullRequests: (params: any) => {
+          if (params.q.includes('type:milestone')) {
+            return { data: { 
+              items: mock.milestoneList.filter((m: any) => m.title.toLowerCase().includes(params.q.replace('type:milestone', '').trim().toLowerCase())) 
+            } };
+          }
+          return { data: { 
+            items: mock.issueList.filter((i: any) => i.title.toLowerCase().includes(params.q.toLowerCase()) || i.body?.toLowerCase().includes(params.q.toLowerCase())) 
+          } };
         },
       },
     };
@@ -271,6 +339,205 @@ describe('GitHubService', () => {
       expect(issue.assignees).to.have.lengthOf(1);
       expect(issue.milestone).to.exist;
       expect(issue.comments).to.equal(3);
+    });
+  });
+
+  describe('createIssue', () => {
+    it('should create an issue with title and body', async () => {
+      const createdIssue = await service.createIssue('testuser', 'test-repo', 'New Issue', 'Issue body');
+      expect(createdIssue.title).to.equal('New Issue');
+      expect(createdIssue.body).to.equal('Issue body');
+    });
+
+    it('should create an issue with optional milestone', async () => {
+      const createdIssue = await service.createIssue('testuser', 'test-repo', 'New Issue', 'Issue body', 1);
+      expect(createdIssue.title).to.equal('New Issue');
+    });
+
+    it('should create an issue without milestone', async () => {
+      const createdIssue = await service.createIssue('testuser', 'test-repo', 'Issue', 'Body', undefined);
+      expect(createdIssue.title).to.equal('Issue');
+    });
+  });
+
+  describe('updateIssue', () => {
+    it('should update issue title', async () => {
+      const updatedIssue = await service.updateIssue('testuser', 'test-repo', 1, { title: 'Updated Title' });
+      expect(updatedIssue.title).to.equal('Updated Title');
+    });
+
+    it('should update issue body', async () => {
+      const updatedIssue = await service.updateIssue('testuser', 'test-repo', 1, { body: 'Updated body' });
+      expect(updatedIssue.body).to.equal('Updated body');
+    });
+
+    it('should update issue state', async () => {
+      const updatedIssue = await service.updateIssue('testuser', 'test-repo', 1, { state: 'closed' });
+      expect(updatedIssue.state).to.equal('closed');
+    });
+  });
+
+  describe('updateMilestone', () => {
+    it('should update milestone title', async () => {
+      const updated = await service.updateMilestone('testuser', 'test-repo', 1, { title: 'Updated Milestone' });
+      expect(updated.title).to.equal('Updated Milestone');
+    });
+
+    it('should update milestone description', async () => {
+      const updated = await service.updateMilestone('testuser', 'test-repo', 1, { description: 'New description' });
+      expect(updated.description).to.equal('New description');
+    });
+
+    it('should update milestone due date', async () => {
+      const updated = await service.updateMilestone('testuser', 'test-repo', 1, { dueOn: '2025-12-31' });
+      expect(updated.dueOn).to.equal('2025-12-31');
+    });
+  });
+
+  describe('getComments', () => {
+    it('should return comments for an issue', async () => {
+      const fakeOctokit: any = {
+        issues: {
+          listComments: () => ({
+            data: [
+              { id: 1, body: 'First comment', created_at: '2024-01-15T00:00:00Z', user: { login: 'user1', html_url: 'https://github.com/user1' } },
+              { id: 2, body: 'Second comment', created_at: '2024-01-16T00:00:00Z', user: { login: 'user2', html_url: 'https://github.com/user2' } },
+            ],
+          }),
+        },
+      };
+
+      const testService = new GitHubService('test-token', () => fakeOctokit);
+      const comments = await testService.getComments('testuser', 'test-repo', 1);
+      expect(comments).to.have.lengthOf(2);
+      expect(comments[0].body).to.equal('First comment');
+      expect(comments[1].user.login).to.equal('user2');
+    });
+
+    it('should handle issue with no comments', async () => {
+      const fakeOctokit: any = {
+        issues: {
+          listComments: () => ({ data: [] }),
+        },
+      };
+
+      const testService = new GitHubService('test-token', () => fakeOctokit);
+      const comments = await testService.getComments('testuser', 'test-repo', 1);
+      expect(comments).to.have.lengthOf(0);
+    });
+  });
+
+  describe('addComment', () => {
+    it('should add a comment to an issue', async () => {
+      const fakeOctokit: any = {
+        issues: {
+          createComment: () => ({
+            data: { id: 100, body: 'New comment', created_at: '2024-02-01T00:00:00Z', user: { login: 'me', html_url: 'https://github.com/me' } },
+          }),
+        },
+      };
+
+      const testService = new GitHubService('test-token', () => fakeOctokit);
+      const comment = await testService.addComment('testuser', 'test-repo', 1, 'New comment');
+      expect(comment.body).to.equal('New comment');
+      expect(comment.user.login).to.equal('me');
+    });
+  });
+
+  describe('searchRepositories', () => {
+    it('should search repositories by query', async () => {
+      const fakeOctokit: any = {
+        search: {
+          repos: () => ({
+            data: {
+              items: [
+                { id: 1, name: 'repo1', owner: { login: 'testuser' }, html_url: 'https://github.com/testuser/repo1', description: 'Repo 1' },
+                { id: 2, name: 'repo2', owner: { login: 'testuser' }, html_url: 'https://github.com/testuser/repo2', description: 'Repo 2' },
+              ],
+            },
+          }),
+        },
+      };
+
+      const testService = new GitHubService('test-token', () => fakeOctokit);
+      const repos = await testService.searchRepositories('repo');
+      expect(repos).to.have.lengthOf(2);
+      expect(repos[0].name).to.equal('repo1');
+    });
+
+    it('should return empty array when no repositories found', async () => {
+      const fakeOctokit: any = {
+        search: {
+          repos: () => ({ data: { items: [] } }),
+        },
+      };
+
+      const testService = new GitHubService('test-token', () => fakeOctokit);
+      const repos = await testService.searchRepositories('nonexistent');
+      expect(repos).to.have.lengthOf(0);
+    });
+  });
+
+  describe('searchIssuesAndMilestones', () => {
+    it('should search for issues', async () => {
+      const fakeOctokit: any = {
+        search: {
+          issuesAndPullRequests: (params: any) => {
+            if (params.q.includes('type:milestone')) {
+              return { data: { items: [] } };
+            }
+            return {
+              data: {
+                items: [
+                  {
+                    id: 1, number: 1, title: 'Test Issue', state: 'open', body: 'Test', html_url: 'https://github.com/testuser/test-repo/issues/1',
+                    created_at: '2024-01-01T00:00:00Z', updated_at: '2024-01-02T00:00:00Z', closed_at: null,
+                    repository_url: 'https://api.github.com/repos/testuser/test-repo',
+                    labels: [], assignees: [], user: { login: 'testuser', html_url: 'https://github.com/testuser', avatar_url: '' },
+                    comments: 0, milestone: null,
+                  },
+                ],
+              },
+            };
+          },
+        },
+      };
+
+      const testService = new GitHubService('test-token', () => fakeOctokit);
+      const results = await testService.searchIssuesAndMilestones('test');
+      const issueResults = results.filter(r => r.type === 'issue');
+      expect(issueResults).to.have.lengthOf(1);
+      expect(issueResults[0].item.title).to.equal('Test Issue');
+    });
+
+    it('should search for milestones', async () => {
+      const fakeOctokit: any = {
+        search: {
+          issuesAndPullRequests: (params: any) => {
+            if (params.q.includes('type:milestone')) {
+              return {
+                data: {
+                  items: [
+                    {
+                      number: 1, title: 'Test Milestone', state: 'open', html_url: 'https://github.com/testuser/test-repo/milestone/1',
+                      created_at: '2024-01-01T00:00:00Z', updated_at: '2024-01-02T00:00:00Z',
+                      repository_url: 'https://api.github.com/repos/testuser/test-repo',
+                      body: 'Milestone body', due_on: '2024-12-31',
+                    },
+                  ],
+                },
+              };
+            }
+            return { data: { items: [] } };
+          },
+        },
+      };
+
+      const testService = new GitHubService('test-token', () => fakeOctokit);
+      const results = await testService.searchIssuesAndMilestones('test');
+      const milestoneResult = results.find(r => r.type === 'milestone');
+      expect(milestoneResult).to.exist;
+      expect(milestoneResult!.item.title).to.equal('Test Milestone');
     });
   });
 });

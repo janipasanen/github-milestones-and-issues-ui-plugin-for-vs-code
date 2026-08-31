@@ -66,10 +66,13 @@ export class MilestoneTreeProvider implements vscode.TreeDataProvider<MilestoneT
     }
 
     try {
+      const config = vscode.workspace.getConfiguration('github-milestones');
+      const filter = config.get<'open' | 'closed' | 'all'>('milestoneFilter') || 'open';
+
       const milestones = await this.github.getMilestones(
         this.selectedOwner,
         this.selectedRepo,
-        'all'
+        filter
       );
 
       return milestones.map(
@@ -99,7 +102,10 @@ export class MilestoneTreeProvider implements vscode.TreeDataProvider<MilestoneT
     }
 
     try {
-      const issues = await this.github.getIssues(owner, repo, milestoneNumber, 'all');
+      const config = vscode.workspace.getConfiguration('github-milestones');
+      const issueFilter = config.get<'open' | 'closed' | 'all'>('issueFilter') || 'open';
+
+      const issues = await this.github.getIssues(owner, repo, milestoneNumber, issueFilter);
 
       return issues.map(
         (issue) =>

@@ -19,6 +19,11 @@
         "icon": "$(refresh)"
       },
       {
+        "command": "github-milestones.searchRepos",
+        "title": "Search Repositories",
+        "icon": "$(search)"
+      },
+      {
         "command": "github-milestones.openIssue",
         "title": "Open Issue",
         "icon": "$(issue-opened)"
@@ -35,6 +40,24 @@
       {
         "command": "github-milestones.signout",
         "title": "Sign out of GitHub"
+      },
+      {
+        "command": "github-milestones.createIssue",
+        "title": "Create Issue",
+        "icon": "$(add)"
+      },
+      {
+        "command": "github-milestones.globalSearch",
+        "title": "Global Search",
+        "icon": "$(search)"
+      },
+      {
+        "command": "github-milestones.editMilestone",
+        "title": "Edit Milestone"
+      },
+      {
+        "command": "github-milestones.editIssue",
+        "title": "Edit Issue"
       }
     ],
     "views": {
@@ -74,6 +97,28 @@
       }
     ],
     "menus": {
+      "view/title": [
+        {
+          "command": "github-milestones.globalSearch",
+          "when": "view == github-milestones.repositories || view == github-milestones.milestones || view == github-milestones.issues",
+          "group": "navigation"
+        },
+        {
+          "command": "github-milestones.searchRepos",
+          "when": "view == github-milestones.repositories",
+          "group": "navigation"
+        },
+        {
+          "command": "github-milestones.createIssue",
+          "when": "view == github-milestones.milestones || view == github-milestones.issues",
+          "group": "navigation"
+        },
+        {
+          "command": "github-milestones.refresh",
+          "when": "view == github-milestones.repositories || view == github-milestones.milestones || view == github-milestones.issues",
+          "group": "navigation"
+        }
+      ],
       "view/item/context": [
         {
           "command": "github-milestones.openIssue",
@@ -83,6 +128,16 @@
         {
           "command": "github-milestones.openMilestone",
           "when": "view == github-milestones.milestones && viewItem == milestone",
+          "group": "inline"
+        },
+        {
+          "command": "github-milestones.editMilestone",
+          "when": "view == github-milestones.milestones && viewItem == milestone",
+          "group": "inline"
+        },
+        {
+          "command": "github-milestones.editIssue",
+          "when": "view == github-milestones.issues && viewItem == issue",
           "group": "inline"
         }
       ],
@@ -107,6 +162,18 @@
         "github-milestones.defaultRepo": {
           "type": "string",
           "description": "Default repository name"
+        },
+        "github-milestones.milestoneFilter": {
+          "type": "string",
+          "enum": ["open", "closed", "all"],
+          "default": "open",
+          "description": "Default filter for milestone state (open, closed, or all)"
+        },
+        "github-milestones.issueFilter": {
+          "type": "string",
+          "enum": ["open", "closed", "all"],
+          "default": "open",
+          "description": "Default filter for issue state (open, closed, or all)"
         }
       }
     }

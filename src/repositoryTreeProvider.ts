@@ -26,10 +26,18 @@ export class RepositoryTreeProvider implements vscode.TreeDataProvider<Repositor
   private _onDidChangeTreeData = new vscode.EventEmitter<RepositoryTreeItem | undefined>();
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
   private loading = false;
+  private repositories: GitHubRepository[] = [];
+  private searchFilter = '';
 
   constructor(private github: GitHubService) {}
 
   refresh(): void {
+    this.searchFilter = '';
+    this._onDidChangeTreeData.fire(undefined);
+  }
+
+  setSearchFilter(filter: string): void {
+    this.searchFilter = filter.toLowerCase();
     this._onDidChangeTreeData.fire(undefined);
   }
 
@@ -60,9 +68,19 @@ export class RepositoryTreeProvider implements vscode.TreeDataProvider<Repositor
     this._onDidChangeTreeData.fire(undefined);
 
     try {
-      const repos = owner ? await this.github.getRepos(owner) : await this.github.getRepos();
+      this.repositories = owner ? await this.github.getRepos(owner) : await this.github.getRepos();
 
-      const sortedRepos = repos.sort((a, b) => {
+      let filteredRepos = [...this.repositories];
+
+      if (this.searchFilter) {
+        filteredRepos = filteredRepos.filter(repo => 
+          repo.name.toLowerCase().includes(this.searchFilter) ||
+          repo.owner.toLowerCase().includes(this.searchFilter) ||
+          (repo.description && repo.description.toLowerCase().includes(this.searchFilter))
+        );
+      }
+
+      const sortedRepos = filteredRepos.sort((a, b) => {
         if (a.name < b.name) return -1;
         if (a.name > b.name) return 1;
         return 0;

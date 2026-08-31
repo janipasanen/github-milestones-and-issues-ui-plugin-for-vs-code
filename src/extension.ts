@@ -13,8 +13,28 @@ let issueProvider: IssueTreeProvider;
 let selectedOwner: string | undefined;
 let selectedRepo: string | undefined;
 let selectedMilestoneNumber: number | undefined;
+const SECRET_KEY = 'github-milestones-token';
 
-export function activate(context: vscode.ExtensionContext) {
+export async function activate(context: vscode.ExtensionContext) {
+  // Try to authenticate with stored token
+  const storedToken = await context.secrets.get(SECRET_KEY);
+  
+  if (storedToken) {
+    try {
+      githubService = new GitHubService(storedToken);
+      const authed = await githubService.authenticate();
+      if (authed) {
+        vscode.window.showInformationMessage('Successfully connected to GitHub!');
+      } else {
+        githubService = null;
+        await context.secrets.delete(SECRET_KEY);
+      }
+    } catch {
+      githubService = null;
+      await context.secrets.delete(SECRET_KEY);
+    }
+  }
+
   // Initialize providers
   repositoryProvider = new RepositoryTreeProvider(new GitHubService(''));
   milestoneProvider = new MilestoneTreeProvider(new GitHubService(''));
@@ -56,7 +76,8 @@ export function activate(context: vscode.ExtensionContext) {
       githubService = new GitHubService(token);
       const authed = await githubService.authenticate();
       if (authed) {
-        vscode.window.showInformationMessage('Successfully signed in to GitHub!');
+        await context.secrets.store(SECRET_KEY, token);
+        vscode.window.showInformationMessage('Successfully connected to GitHub!');
         updateTreeProviders();
       } else {
         vscode.window.showErrorMessage('Authentication failed. Please check your token.');
@@ -71,12 +92,13 @@ export function activate(context: vscode.ExtensionContext) {
 
   // Sign out command
   const signOut = vscode.commands.registerCommand('github-milestones.signout', async () => {
+    await context.secrets.delete(SECRET_KEY);
     githubService = null;
     selectedOwner = undefined;
     selectedRepo = undefined;
     selectedMilestoneNumber = undefined;
     updateTreeProviders();
-    vscode.window.showInformationMessage('Signed out of GitHub.');
+    vscode.window.showInformationMessage('Disconnected from GitHub.');
   });
   context.subscriptions.push(signOut);
 
@@ -91,6 +113,339 @@ export function activate(context: vscode.ExtensionContext) {
     }
   });
   context.subscriptions.push(refresh);
+
+  // Search repositories command
+  const searchRepos = vscode.commands.registerCommand('github-milestones.searchRepos', async () => {
+    const query = await vscode.window.showInputBox({
+      prompt: 'Search repositories',
+      placeHolder: 'Type to filter repositories...',
+      ignoreFocusOut: true,
+    });
+
+    if (query !== undefined && githubService) {
+      repositoryProvider.setSearchFilter(query);
+    }
+  });
+  context.subscriptions.push(searchRepos);
+
+  // Create issue command
+  const createIssue = vscode.commands.registerCommand('github-milestones.createIssue', async () => {
+    if (!githubService) {
+      vscode.window.showErrorMessage('Please sign in to GitHub first.');
+      return;
+    }
+
+    let targetOwner = selectedOwner;
+    let targetRepo = selectedRepo;
+
+    if (!targetOwner || !targetRepo) {
+      const repos = await githubService.getRepos();
+      const repoOptions = repos.map(r => ({
+        label: `${r.owner}/${r.name}`,
+        description: r.description || '',
+        owner: r.owner,
+        name: r.name,
+      }));
+
+      const selected = await vscode.window.showQuickPick(repoOptions, {
+        placeHolder: 'Select a repository...',
+        matchOnDetail: true,
+      });
+
+      if (!selected) {
+        return;
+      }
+
+      targetOwner = selected.owner;
+      targetRepo = selected.name;
+    }
+
+    const title = await vscode.window.showInputBox({
+      prompt: 'Issue title (required)',
+      placeHolder: 'Enter issue title...',
+      ignoreFocusOut: true,
+      validateInput: (value) => {
+        if (!value || !value.trim()) {
+          return 'Title is required';
+        }
+        return null;
+      },
+    });
+
+    if (!title) {
+      return;
+    }
+
+    const body = await vscode.window.showInputBox({
+      prompt: 'Issue description (required)',
+      placeHolder: 'Describe the issue...',
+      ignoreFocusOut: true,
+      validateInput: (value) => {
+        if (!value || !value.trim()) {
+          return 'Description is required';
+        }
+        return null;
+      },
+    });
+
+    if (!body) {
+      return;
+    }
+
+    let milestoneNum: number | undefined;
+
+    const showMilestoneChoice = await vscode.window.showQuickPick(
+      [
+        { label: 'No milestone', description: 'Create without milestone', pick: undefined },
+        { label: 'Select milestone...', description: 'Choose from list', pick: 'select' },
+      ],
+      {
+        placeHolder: 'Assign to milestone (optional)',
+      }
+    );
+
+    if (showMilestoneChoice?.pick === 'select' && targetOwner && targetRepo) {
+      try {
+        const milestones = await githubService.getMilestones(targetOwner, targetRepo, 'open');
+        const milestoneOptions = milestones.map(m => ({
+          label: m.title,
+          description: `${m.openIssues} open issues${m.dueOn ? ` · Due: ${m.dueOn}` : ''}`,
+          number: m.number,
+        }));
+
+        if (milestoneOptions.length === 0) {
+          vscode.window.showInformationMessage('No open milestones found.');
+        } else {
+          const selectedMilestone = await vscode.window.showQuickPick(milestoneOptions, {
+            placeHolder: 'Select a milestone...',
+          });
+
+          if (selectedMilestone) {
+            milestoneNum = selectedMilestone.number;
+          }
+        }
+      } catch (error) {
+        vscode.window.showErrorMessage(`Failed to load milestones: ${(error as Error).message}`);
+      }
+    }
+
+    try {
+      const createdIssue = await githubService.createIssue(
+        targetOwner,
+        targetRepo,
+        title,
+        body,
+        milestoneNum
+      );
+
+      vscode.window.showInformationMessage(`Issue #${createdIssue.number} created successfully!`);
+
+      if (targetOwner && targetRepo) {
+        milestoneProvider.setSelection(targetOwner, targetRepo, selectedMilestoneNumber);
+        issueProvider.setSelection(targetOwner, targetRepo, selectedMilestoneNumber);
+      }
+    } catch (error) {
+      vscode.window.showErrorMessage(`Failed to create issue: ${(error as Error).message}`);
+    }
+  });
+  context.subscriptions.push(createIssue);
+
+  // Edit milestone command
+  const editMilestone = vscode.commands.registerCommand('github-milestones.editMilestone', async (milestone: GitHubMilestone) => {
+    if (!githubService || !selectedOwner || !selectedRepo) {
+      vscode.window.showErrorMessage('Please select a repository first.');
+      return;
+    }
+
+    const title = await vscode.window.showInputBox({
+      prompt: 'Milestone title',
+      value: milestone.title,
+      ignoreFocusOut: true,
+      validateInput: (value) => {
+        if (!value || !value.trim()) {
+          return 'Title is required';
+        }
+        return null;
+      },
+    });
+
+    if (!title) {
+      return;
+    }
+
+    const description = await vscode.window.showInputBox({
+      prompt: 'Milestone description',
+      value: milestone.description || '',
+      ignoreFocusOut: true,
+      placeHolder: 'Enter description...',
+    });
+
+    const dueDate = await vscode.window.showInputBox({
+      prompt: 'Due date (YYYY-MM-DD)',
+      value: milestone.dueOn || '',
+      ignoreFocusOut: true,
+      placeHolder: '2024-12-31 or leave empty to clear',
+    });
+
+    if (milestone.title !== title || milestone.description !== description) {
+      try {
+        const updates: any = {
+          title,
+          description,
+        };
+
+        if (dueDate !== undefined) {
+          updates.dueOn = dueDate.trim() || null;
+        }
+
+        const updated = await githubService.updateMilestone(selectedOwner, selectedRepo, milestone.number, updates);
+
+        vscode.window.showInformationMessage('Milestone updated successfully!');
+        milestoneProvider.setSelection(selectedOwner, selectedRepo, selectedMilestoneNumber);
+      } catch (error) {
+        vscode.window.showErrorMessage(`Failed to update milestone: ${(error as Error).message}`);
+      }
+    }
+  });
+  context.subscriptions.push(editMilestone);
+
+  // Edit issue command
+  const editIssue = vscode.commands.registerCommand('github-milestones.editIssue', async (issue: GitHubIssue) => {
+    if (!githubService || !selectedOwner || !selectedRepo) {
+      vscode.window.showErrorMessage('Please select a repository first.');
+      return;
+    }
+
+    const title = await vscode.window.showInputBox({
+      prompt: 'Issue title',
+      value: issue.title,
+      ignoreFocusOut: true,
+      validateInput: (value) => {
+        if (!value || !value.trim()) {
+          return 'Title is required';
+        }
+        return null;
+      },
+    });
+
+    if (!title) {
+      return;
+    }
+
+    const body = await vscode.window.showInputBox({
+      prompt: 'Issue description',
+      value: issue.body || '',
+      ignoreFocusOut: true,
+      placeHolder: 'Enter description...',
+    });
+
+    const statePicks = [
+      { label: 'Open', value: 'open' as const },
+      { label: 'Closed', value: 'closed' as const },
+    ];
+
+    const stateSelection = await vscode.window.showQuickPick(statePicks, {
+      placeHolder: `Current state: ${issue.state}`,
+    });
+
+    if (stateSelection && issue.state !== stateSelection.value) {
+      try {
+        await githubService.updateIssue(selectedOwner, selectedRepo, issue.number, {
+          title,
+          body,
+          state: stateSelection.value,
+        });
+
+        vscode.window.showInformationMessage('Issue updated successfully!');
+        milestoneProvider.setSelection(selectedOwner, selectedRepo, selectedMilestoneNumber);
+        issueProvider.setSelection(selectedOwner, selectedRepo, selectedMilestoneNumber);
+      } catch (error) {
+        vscode.window.showErrorMessage(`Failed to update issue: ${(error as Error).message}`);
+      }
+    } else {
+      try {
+        await githubService.updateIssue(selectedOwner, selectedRepo, issue.number, {
+          title,
+          body,
+        });
+
+        vscode.window.showInformationMessage('Issue updated successfully!');
+        milestoneProvider.setSelection(selectedOwner, selectedRepo, selectedMilestoneNumber);
+        issueProvider.setSelection(selectedOwner, selectedRepo, selectedMilestoneNumber);
+      } catch (error) {
+        vscode.window.showErrorMessage(`Failed to update issue: ${(error as Error).message}`);
+      }
+    }
+  });
+  context.subscriptions.push(editIssue);
+
+  // Global search command
+  const globalSearch = vscode.commands.registerCommand('github-milestones.globalSearch', async () => {
+    if (!githubService) {
+      vscode.window.showErrorMessage('Please sign in to GitHub first.');
+      return;
+    }
+
+    const query = await vscode.window.showInputBox({
+      prompt: 'Search issues and milestones',
+      placeHolder: 'Enter search query...',
+      ignoreFocusOut: true,
+    });
+
+    if (!query) {
+      return;
+    }
+
+    try {
+      const results = await githubService.searchIssuesAndMilestones(query);
+
+      if (results.length === 0) {
+        vscode.window.showInformationMessage('No results found.');
+        return;
+      }
+
+      const items = results.map(r => {
+        const typeIcon = r.type === 'issue' ? '#' : 'M';
+        const detail = `${r.owner}/${r.repo}`;
+        return {
+          label: `${typeIcon} ${r.item.title}`,
+          description: detail,
+          detail: r.type === 'issue' ? `Issue #${(r.item as GitHubIssue).number}` : `Milestone #${(r.item as GitHubMilestone).number}`,
+          type: r.type,
+          owner: r.owner,
+          repo: r.repo,
+          item: r.item,
+        };
+      });
+
+      const selection = await vscode.window.showQuickPick(items, {
+        placeHolder: 'Select an item to view details...',
+        matchOnDescription: true,
+        matchOnDetail: true,
+      });
+
+      if (selection) {
+        if (selection.type === 'issue') {
+          vscode.commands.executeCommand(
+            'github-milestones.openIssueDetail',
+            selection.owner,
+            selection.repo,
+            selection.item as GitHubIssue
+          );
+        } else {
+          vscode.commands.executeCommand(
+            'github-milestones.openMilestoneDetail',
+            selection.owner,
+            selection.repo,
+            selection.item as GitHubMilestone
+          );
+        }
+      }
+    } catch (error) {
+      vscode.window.showErrorMessage(`Search failed: ${(error as Error).message}`);
+    }
+  });
+  context.subscriptions.push(globalSearch);
 
   // Open repository command
   const openRepo = vscode.commands.registerCommand(
