@@ -1,0 +1,12 @@
+.vscode
+.vscodeignore
+.git
+gitignore
+README.md
+LICENSE
+CHANGELOG.md
+.editorconfig
+.eslintrc.js
+.prettierrc.js
+tsconfig.json
+*.log

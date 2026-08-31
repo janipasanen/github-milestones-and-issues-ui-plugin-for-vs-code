@@ -1,0 +1,138 @@
+{
+  "name": "github-milestones-issues",
+  "displayName": "GitHub Milestones & Issues",
+  "description": "View GitHub milestones and issues directly in VS Code",
+  "version": "0.1.0",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "github-milestones.refresh",
+        "title": "Refresh Milestones",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "github-milestones.openIssue",
+        "title": "Open Issue",
+        "icon": "$(issue-opened)"
+      },
+      {
+        "command": "github-milestones.openMilestone",
+        "title": "Open Milestone",
+        "icon": "$(milestone)"
+      },
+      {
+        "command": "github-milestones.signin",
+        "title": "Sign in to GitHub"
+      },
+      {
+        "command": "github-milestones.signout",
+        "title": "Sign out of GitHub"
+      }
+    ],
+    "views": {
+      "github-milestones": [
+        {
+          "type": "tree",
+          "id": "github-milestones.repositories",
+          "name": "Repositories",
+          "icon": "$(repo)"
+        },
+        {
+          "type": "tree",
+          "id": "github-milestones.milestones",
+          "name": "Milestones",
+          "icon": "$(milestone)"
+        },
+        {
+          "type": "tree",
+          "id": "github-milestones.issues",
+          "name": "Issues",
+          "icon": "$(issue-opened)"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "github-milestones.repositories",
+        "contents": "No repositories connected.\n[Sign in to GitHub](command:github-milestones.signin)\nConnect to GitHub to view your repositories, milestones, and issues."
+      },
+      {
+        "view": "github-milestones.milestones",
+        "contents": "Select a repository to view milestones.\n[Refresh](command:github-milestones.refresh)"
+      },
+      {
+        "view": "github-milestones.issues",
+        "contents": "Select a milestone to view issues.\n[Refresh](command:github-milestones.refresh)"
+      }
+    ],
+    "menus": {
+      "view/item/context": [
+        {
+          "command": "github-milestones.openIssue",
+          "when": "view == github-milestones.issues && viewItem == issue",
+          "group": "inline"
+        },
+        {
+          "command": "github-milestones.openMilestone",
+          "when": "view == github-milestones.milestones && viewItem == milestone",
+          "group": "inline"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "github-milestones.openIssue",
+          "when": "false"
+        },
+        {
+          "command": "github-milestones.openMilestone",
+          "when": "false"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "GitHub Milestones & Issues",
+      "properties": {
+        "github-milestones.defaultOwner": {
+          "type": "string",
+          "description": "Default repository owner (username or organization)"
+        },
+        "github-milestones.defaultRepo": {
+          "type": "string",
+          "description": "Default repository name"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run package",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "tsc -p ./ --noEmit",
+    "build": "npm run compile",
+    "test": "mocha -r ts-node/register test/github.test.ts"
+  },
+  "dependencies": {
+    "@octokit/rest": "^21.0.0"
+  },
+  "devDependencies": {
+    "@types/chai": "^5.2.3",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "chai": "^6.2.2",
+    "mocha": "^11.8.0",
+    "sinon": "^22.1.0",
+    "sinon-chai": "^4.0.1",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.3.0"
+  },
+  "publisher": "jani"
+}
